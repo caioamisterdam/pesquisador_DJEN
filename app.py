@@ -1,61 +1,140 @@
 import streamlit as st
-import requests
+import pdfplumber
+import re
+import zipfile
+import json
+import pandas as pd
+import io
+import unicodedata
 from datetime import datetime, timedelta
 
-# Configurações da página
-st.set_page_config(page_title="Gerador de Links DJEN", page_icon="🔗", layout="centered")
+st.set_page_config(page_title="Rastreador DJEN Público", page_icon="⚖️", layout="wide")
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'application/json'
-}
+FRASE_ALVO = "PROCESSO PAUTADO PARA A SESSÃO DE JULGAMENTO VIRTUAL"
 
-st.title("🔗 Gerador de Links Diretos - DJEN (TJSP)")
-st.markdown("Selecione a data para obter o link oficial de download do Diário diretamente da API do PJe.")
+# --- FUNÇÕES DE LIMPEZA E NORMALIZAÇÃO ---
+def remover_acentos(texto):
+    if not texto: return ""
+    return "".join([c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c)])
 
-# Interface de seleção de data
-data_selecionada = st.date_input("Escolha a data do Diário:", value=datetime.now())
+def normalizar_texto(texto):
+    if not texto: return ""
+    return " ".join(remover_acentos(texto).split()).upper()
+
+def limpar_estrito(texto):
+    return re.sub(r'\D', '', str(texto))
+
+def extrair_pauta(uploaded_file, manual_input):
+    processos = set()
+    padrao_cnj = r'\d{7}\s*-\s*\d{2}\s*\.\s*\d{4}\s*\.\s*\d\s*\.\s*\d{2}\s*\.\s*\d{4}(?:[\/\-]\d+)?'
+    
+    if uploaded_file is not None:
+        if uploaded_file.name.lower().endswith('.pdf'):
+            with pdfplumber.open(uploaded_file) as pdf:
+                for pagina in pdf.pages:
+                    texto = pagina.extract_text()
+                    if texto:
+                        for m in re.findall(padrao_cnj, texto): procesos.add(re.sub(r'\s+', '', m))
+        else:
+            txt_content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
+            for m in re.findall(padrao_cnj, txt_content): processos.add(re.sub(r'\s+', '', m))
+    
+    if manual_input:
+        for m in re.findall(padrao_cnj, manual_input): processos.add(re.sub(r'\s+', '', m))
+            
+    return sorted(list(processos))
+
+# --- INTERFACE ---
+st.title("⚖️ Rastreador DJEN - Versão Web Sem Bloqueios")
+st.markdown("Crie links de download e cruze dados sem risco de Erro 403.")
+
+# --- PASSO 1: GERADOR DE LINKS ---
+st.subheader("🔗 Passo 1: Obter o arquivo do Diário Oficial")
+col_data, col_link = st.columns([1, 2])
+
+with col_data:
+    data_selecionada = st.date_input("Escolha a data do Diário:", value=datetime.now())
+
+with col_link:
+    data_formatada = data_selecionada.strftime('%Y-%m-%d')
+    url_copiar = f"https://comunicaapi.pje.jus.br/api/v1/caderno/TJSP/{data_formatada}/D"
+    
+    st.markdown("**Como o Tribunal bloqueia o site, faça você mesmo a consulta rápida:**")
+    st.markdown(f"1. Clique neste link para abrir a resposta do Tribunal: [Abrir Link da API]({url_copiar})")
+    st.markdown("2. Você verá um texto na tela. Procure por `\"url\": \"https://...\"` e clique nele para baixar o arquivo `.zip`.")
 
 st.divider()
 
-if st.button("🔍 Obter Link de Download", use_container_width=True):
-    # Formata as datas para a API
-    d_api = data_selecionada.strftime('%Y-%m-%d')
-    d_br = data_selecionada.strftime('%d/%m/%Y')
-    
-    # URL da API do PJe para o caderno do TJSP
-    url_api = f"https://comunicaapi.pje.jus.br/api/v1/caderno/TJSP/{d_api}/D"
-    
-    with st.spinner(f"Consultando API para o dia {d_br}..."):
-        try:
-            res = requests.get(url_api, headers=HEADERS, timeout=15)
+# --- PASSO 2: CRUZAMENTO DE DADOS ---
+st.subheader("📊 Passo 2: Cruzar os Dados")
+c1, c2 = st.columns(2)
+
+with c1:
+    st.markdown("**Seus Processos Alvo**")
+    arquivo_pauta = st.file_uploader("Suba a Pauta (PDF ou TXT)", type=["pdf", "txt"], key="pauta")
+    texto_manual = st.text_area("Ou cole os processos aqui (um por linha):", height=150)
+
+with c2:
+    st.markdown("**O Diário Oficial Baixado**")
+    arquivo_diario = st.file_uploader("Suba o arquivo .zip do Diário que você baixou no Passo 1", type=["zip"], key="diario")
+
+btn_processar = st.button("🚀 Cruzar Dados e Buscar Pautas", use_container_width=True)
+
+# --- LÓGICA DE PROCESSAMENTO ---
+if btn_processar:
+    if (not arquivo_pauta and not texto_manual) or not arquivo_diario:
+        st.error("❌ Por favor, informe os processos e também suba o arquivo .zip do Diário.")
+    else:
+        lista_pauta = extrair_pauta(arquivo_pauta, texto_manual)
+        
+        if not lista_pauta:
+            st.warning("⚠️ Nenhum número de processo válido foi detectado.")
+        else:
+            alvos = {limpar_estrito(p): p for p in lista_pauta}
+            frase_procurada_norm = normalizar_texto(FRASE_ALVO)
+            resultados = []
+            encontrados_set = set()
             
-            if res.status_code == 200:
-                dados = res.json()
-                url_zip = dados.get('url')
+            st.info(f"📋 {len(lista_pauta)} processos identificados. Analisando o ZIP enviado...")
+
+            try:
+                with zipfile.ZipFile(io.BytesIO(arquivo_diario.getvalue())) as z:
+                    for nome_json in z.namelist():
+                        corpo_raw = z.read(nome_json).decode('utf-8', errors='ignore')
+                        corpo_limpo_num = limpar_estrito(corpo_raw)
+                        
+                        for num_limpo, num_orig in alvos.items():
+                            if num_limpo in corpo_limpo_num:
+                                texto_diario_norm = normalizar_texto(corpo_raw)
+                                if frase_procurada_norm in texto_diario_norm:
+                                    if num_limpo not in encontrados_set:
+                                        encontrados_set.add(num_limpo)
+                                        resultados.append({
+                                            'Processo': num_orig,
+                                            'Status': 'Pautado para Julgamento Virtual'
+                                        })
+            except Exception as e:
+                st.error(f"❌ Erro ao ler o arquivo ZIP do Diário: {e}")
+
+            # --- EXIBIÇÃO ---
+            st.divider()
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("Localizados no Diário Anexado", len(encontrados_set))
+            col_m2.metric("Não Encontrados", len(lista_pauta) - len(encontrados_set))
+
+            if resultados:
+                df = pd.DataFrame(resultados)
+                df.index = range(1, len(df) + 1)
+                df.index.name = 'Nº'
+                st.subheader("📊 Correspondências Encontradas")
+                st.table(df)
                 
-                if url_zip:
-                    st.success(f"🎉 Link encontrado para o Diário de {d_br}!")
-                    
-                    # Caixa de destaque com o link clicável
-                    st.markdown(f"""
-                    <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-top: 10px;">
-                        <h4 style="margin-top: 0;">📦 Arquivo do Diário (.zip)</h4>
-                        <p>Clique no link abaixo para baixar direto do Tribunal:</p>
-                        <a href="{url_zip}" target="_blank" style="font-weight: bold; color: #ff4b4b; word-break: break-all;">{url_zip}</a>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.caption("💡 Após baixar o arquivo acima, você pode jogá-lo na versão web do seu rastreador para cruzar com a lista de processos!")
-                else:
-                    st.warning(f"⚠️ A API respondeu, mas não encontrou nenhum link de Diário disponível para {d_br}. (Pode ser um final de semana, feriado ou o diário ainda não foi gerado).")
+                csv = df.to_csv(index=True, encoding='utf-8-sig', sep=';').encode('utf-8-sig')
+                st.download_button("📥 Baixar Planilha", data=csv, file_name="resultado_cruzamento.csv")
             
-            elif res.status_code == 404: 
-                st.error(f"❌ Diário de {d_br} não encontrado na API. Verifique se a data está correta ou se é um dia útil.")
-            else:
-                st.error(f"❌ Erro na API do Tribunal (Código {res.status_code}). Tente novamente mais tarde.")
-                
-        except requests.exceptions.Timeout:
-            st.error("⏳ O servidor do Tribunal demorou muito para responder. Tente novamente.")
-        except Exception as e:
-            st.error(f"❌ Ocorreu um erro inesperado: {e}")
+            faltantes = [p for limpo, p in alvos.items() if limpo not in encontrados_set]
+            if faltantes:
+                with st.expander("❌ Ver Processos Ausentes neste Diário"):
+                    df_f = pd.DataFrame(sorted(faltantes), columns=["Processo Ausente"])
+                    df_f.index = range(1, len(df_f) + 1)
+                    st.table(df_f)
