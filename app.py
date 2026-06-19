@@ -34,7 +34,7 @@ def extrair_pauta(uploaded_file, manual_input):
                 for pagina in pdf.pages:
                     texto = pagina.extract_text()
                     if texto:
-                        for m in re.findall(padrao_cnj, texto): procesos.add(re.sub(r'\s+', '', m))
+                        for m in re.findall(padrao_cnj, texto): processos.add(re.sub(r'\s+', '', m))
         else:
             txt_content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
             for m in re.findall(padrao_cnj, txt_content): processos.add(re.sub(r'\s+', '', m))
@@ -46,27 +46,30 @@ def extrair_pauta(uploaded_file, manual_input):
 
 # --- INTERFACE ---
 st.title("⚖️ Rastreador DJEN - Versão Web Sem Bloqueios")
-st.markdown("Crie links de download e cruze dados sem risco de Erro 403.")
+st.markdown("Cruze dados de pautas e diários sem risco de Erro 403 ou assinaturas expiradas.")
 
-# --- PASSO 1: GERADOR DE LINKS ---
-st.subheader("🔗 Passo 1: Obter o arquivo do Diário Oficial")
-col_data, col_link = st.columns([1, 2])
+# --- PASSO 1: INSTRUÇÕES VISUAIS ---
+st.subheader("🔗 1. Obter o arquivo do Diário Oficial (Sem Erros)")
+
+col_data, col_instrucoes = st.columns([1, 2])
 
 with col_data:
     data_selecionada = st.date_input("Escolha a data do Diário:", value=datetime.now())
-
-with col_link:
     data_formatada = data_selecionada.strftime('%Y-%m-%d')
     url_copiar = f"https://comunicaapi.pje.jus.br/api/v1/caderno/TJSP/{data_formatada}/D"
-    
-    st.markdown("**Como o Tribunal bloqueia o site, faça você mesmo a consulta rápida:**")
-    st.markdown(f"1. Clique neste link para abrir a resposta do Tribunal: [Abrir Link da API]({url_copiar})")
-    st.markdown("2. Você verá um texto na tela. Procure por `\"url\": \"https://...\"` e clique nele para baixar o arquivo `.zip`.")
+
+with col_instrucoes:
+    st.markdown(f"""
+    Como o Tribunal possui travas de segurança, siga este procedimento rápido usando seu próprio navegador:
+    1. **Acesse a API:** Clique para abrir a resposta oficial do dia: [Abrir Link da API do Tribunal]({url_copiar})
+    2. **Copie o Link Interno:** Na tela que abrir, você verá um texto com a estrutura `"url":"https://..."`. Copie todo o link que começa com *https* e vai até o final.
+    3. **Cole no Navegador:** Cole esse link copiado em uma nova aba do seu navegador e aperte Enter. O download do arquivo `.zip` começará imediatamente.
+    """)
 
 st.divider()
 
 # --- PASSO 2: CRUZAMENTO DE DADOS ---
-st.subheader("📊 Passo 2: Cruzar os Dados")
+st.subheader("📊 2. Cruzar os Dados")
 c1, c2 = st.columns(2)
 
 with c1:
@@ -76,7 +79,7 @@ with c1:
 
 with c2:
     st.markdown("**O Diário Oficial Baixado**")
-    arquivo_diario = st.file_uploader("Suba o arquivo .zip do Diário que você baixou no Passo 1", type=["zip"], key="diario")
+    arquivo_diario = st.file_uploader("Suba o arquivo .zip do Diário baixado no Passo 1", type=["zip"], key="diario")
 
 btn_processar = st.button("🚀 Cruzar Dados e Buscar Pautas", use_container_width=True)
 
@@ -95,7 +98,7 @@ if btn_processar:
             resultados = []
             encontrados_set = set()
             
-            st.info(f"📋 {len(lista_pauta)} processos identificados. Analisando o ZIP enviado...")
+            st.info(f"📋 {len(lista_pauta)} processos identificados. Analisando o arquivo enviado...")
 
             try:
                 with zipfile.ZipFile(io.BytesIO(arquivo_diario.getvalue())) as z:
@@ -114,7 +117,7 @@ if btn_processar:
                                             'Status': 'Pautado para Julgamento Virtual'
                                         })
             except Exception as e:
-                st.error(f"❌ Erro ao ler o arquivo ZIP do Diário: {e}")
+                st.error(f"❌ Erro ao ler o arquivo ZIP do Diário. Certifique-se de que o download foi concluído com sucesso.")
 
             # --- EXIBIÇÃO ---
             st.divider()
