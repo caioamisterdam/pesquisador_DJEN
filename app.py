@@ -6,6 +6,7 @@ import json
 import pandas as pd
 import io
 import unicodedata
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Rastreador DJEN Público", page_icon="⚖️", layout="wide")
@@ -46,25 +47,50 @@ def extrair_pauta(uploaded_file, manual_input):
 
 # --- INTERFACE ---
 st.title("⚖️ Rastreador DJEN - Versão Web Sem Bloqueios")
-st.markdown("Cruze dados de pautas e diários sem risco de Erro 403 ou assinaturas expiradas.")
+st.markdown("Cruze dados de pautas e diários de forma simples e sem erros de assinatura.")
 
-# --- PASSO 1: INSTRUÇÕES VISUAIS ---
-st.subheader("🔗 1. Obter o arquivo do Diário Oficial (Sem Erros)")
-
-col_data, col_instrucoes = st.columns([1, 2])
+# --- PASSO 1: GERADOR INTELIGENTE (RESOLVE O SIGNATURE DOES NOT MATCH) ---
+st.subheader("🔗 1. Obter o arquivo do Diário Oficial")
+col_data, col_botao = st.columns([1, 2])
 
 with col_data:
     data_selecionada = st.date_input("Escolha a data do Diário:", value=datetime.now())
     data_formatada = data_selecionada.strftime('%Y-%m-%d')
-    url_copiar = f"https://comunicaapi.pje.jus.br/api/v1/caderno/TJSP/{data_formatada}/D"
+    url_api_tribunal = f"https://comunicaapi.pje.jus.br/api/v1/caderno/TJSP/{data_formatada}/D"
 
-with col_instrucoes:
-    st.markdown(f"""
-    Como o Tribunal possui travas de segurança, siga este procedimento rápido usando seu próprio navegador:
-    1. **Acesse a API:** Clique para abrir a resposta oficial do dia: [Abrir Link da API do Tribunal]({url_copiar})
-    2. **Copie o Link Interno:** Na tela que abrir, você verá um texto com a estrutura `"url":"https://..."`. Copie todo o link que começa com *https* e vai até o final.
-    3. **Cole no Navegador:** Cole esse link copiado em uma nova aba do seu navegador e aperte Enter. O download do arquivo `.zip` começará imediatamente.
-    """)
+with col_botao:
+    st.markdown("**Baixar usando sua internet (Evita bloqueios e corrige erros do Tribunal):**")
+    
+    # Script em JavaScript que roda no navegador do usuário, busca o link e limpa as barras duplas
+    js_code = f"""
+    <script>
+    async function baixarDiario() {{
+        try {{
+            let response = await fetch('{url_api_tribunal}');
+            if (response.ok) {{
+                let data = await response.json();
+                if (data.url) {{
+                    // O PULO DO GATO: Corrige as barras duplas que quebram a assinatura da Amazon
+                    let urlCorrigida = data.url.replace(/(?<!:|\\/)\\/\\//g, "/");
+                    window.open(urlCorrigida, '_blank');
+                }} else {{
+                    alert('Nenhum diário disponível para esta data.');
+                }}
+            }} else {{
+                alert('Erro ao consultar o Tribunal. Código: ' + response.status);
+            }}
+        }} catch (err) {{
+            // Se o fetch direto der bloqueio de CORS no navegador, criamos o link de contingência
+            alert('Por segurança do navegador, abra o link da API manualmente e limpe as barras duplas do link gerado.');
+            window.open('{url_api_tribunal}', '_blank');
+        }}
+    }}
+    </script>
+    <button onclick="baixarDiario()" style="background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%;">
+        📥 Gerar e Baixar Diário (.zip) Oficial
+    </button>
+    """
+    components.html(js_code, height=60)
 
 st.divider()
 
@@ -117,7 +143,7 @@ if btn_processar:
                                             'Status': 'Pautado para Julgamento Virtual'
                                         })
             except Exception as e:
-                st.error(f"❌ Erro ao ler o arquivo ZIP do Diário. Certifique-se de que o download foi concluído com sucesso.")
+                st.error(f"❌ Erro ao ler o arquivo ZIP do Diário. Certifique-se de que o arquivo baixado não está corrompido.")
 
             # --- EXIBIÇÃO ---
             st.divider()
