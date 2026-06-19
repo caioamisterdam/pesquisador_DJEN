@@ -6,11 +6,11 @@ import json
 import pandas as pd
 import io
 import unicodedata
-import gc  # Coletor de lixo do Python para forçar limpeza de memória
+import gc  
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Rastreador DJEN Eco-Memory", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Rastreador DJEN", page_icon="⚡", layout="wide")
 
 FRASE_ALVO = "PROCESSO PAUTADO PARA A SESSÃO DE JULGAMENTO VIRTUAL"
 
@@ -46,7 +46,7 @@ def extrair_pauta(uploaded_file, manual_input):
     return sorted(list(processos))
 
 # --- INTERFACE ---
-st.title("⚡ Rastreador DJEN - Versão de Alta Performance")
+st.title("⚡ Rastreador DJEN")
 st.markdown("Otimizado para rodar com baixo consumo de memória na nuvem.")
 
 # --- PASSO 1: GERADOR EM MASSA ---
@@ -130,7 +130,7 @@ with c2:
 
 btn_processar = st.button("🚀 Iniciar Cruzamento de Baixo Consumo", use_container_width=True)
 
-# --- LÓGICA ULTRA-OTIMIZADA ---
+# --- LÓGICA ---
 if btn_processar:
     if (not arquivo_pauta and not texto_manual) or not arquivos_diarios:
         st.error("❌ Por favor, informe os processos e suba os arquivos .zip do Diário.")
@@ -151,10 +151,15 @@ if btn_processar:
 
             regex_numeros = re.compile(r'\d+')
 
-            # Processamento em fluxo para proteger a memória do servidor
             for arquivo_zip_unico in arquivos_diarios:
+                # Extrai a data do nome do arquivo ZIP para exibição limpa
+                match_data = re.search(r'\d{4}-\d{2}-\d{2}', arquivo_zip_unico.name)
+                if match_data:
+                    data_exibicao = datetime.strptime(match_data.group(), '%Y-%m-%d').strftime('%d/%m/%Y')
+                else:
+                    data_exibicao = arquivo_zip_unico.name
+
                 try:
-                    # Lemos o arquivo em partes, sem carregar o ZIP inteiro na memória do Streamlit de uma vez
                     with zipfile.ZipFile(io.BytesIO(arquivo_zip_unico.read())) as z:
                         for nome_json in z.namelist():
                             corpo_raw = z.read(nome_json).decode('utf-8', errors='ignore')
@@ -168,18 +173,16 @@ if btn_processar:
                                         if num_limpo not in encontrados_set:
                                             encontrados_set.add(num_limpo)
                                             resultados.append({
-                                                'Diário Origem': arquivo_zip_unico.name,
+                                                'Data do Diário': data_exibicao,
                                                 'Processo': alvos[num_limpo],
                                                 'Status': 'Pautado para Julgamento Virtual'
                                             })
                             
-                            # Limpeza imediata da variável de texto para liberar RAM
                             del corpo_raw
                             del numeros_no_json
                 except Exception as e:
                     st.error(f"⚠️ Falha técnica ao ler {arquivo_zip_unico.name}.")
                 finally:
-                    # Força o Python a esvaziar os dados descartados do servidor imediatamente
                     gc.collect()
 
             # --- EXIBIÇÃO ---
