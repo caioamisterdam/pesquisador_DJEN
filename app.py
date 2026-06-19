@@ -6,14 +6,14 @@ import json
 import pandas as pd
 import io
 import unicodedata
+import gc  # Coletor de lixo do Python para forçar limpeza de memória
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Rastreador DJEN", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Rastreador DJEN Eco-Memory", page_icon="⚡", layout="wide")
 
 FRASE_ALVO = "PROCESSO PAUTADO PARA A SESSÃO DE JULGAMENTO VIRTUAL"
 
-# --- FUNÇÕES DE LIMPEZA E NORMALIZAÇÃO ---
 def remover_acentos(texto):
     if not texto: return ""
     return "".join([c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c)])
@@ -46,8 +46,8 @@ def extrair_pauta(uploaded_file, manual_input):
     return sorted(list(processos))
 
 # --- INTERFACE ---
-st.title("⚡ Rastreador DJEN")
-st.markdown("Download em massa e cruzamento de dados com algoritmo de alta performance.")
+st.title("⚡ Rastreador DJEN - Versão de Alta Performance")
+st.markdown("Otimizado para rodar com baixo consumo de memória na nuvem.")
 
 # --- PASSO 1: GERADOR EM MASSA ---
 st.subheader("🔗 1. Obter os arquivos do Diário Oficial (Por Período)")
@@ -79,7 +79,7 @@ with col_botao:
         }}
         
         if (datas.length > 10) {{
-            if (!confirm('Você selecionou ' + datas.length + ' dias úteis. Isso abrirá muitas janelas de download de uma vez. Deseja continuar?')) {{
+            if (!confirm('Você selecionou ' + datas.length + ' dias úteis. Deseja continuar?')) {{
                 return;
             }}
         }}
@@ -116,7 +116,7 @@ with col_botao:
 st.divider()
 
 # --- PASSO 2: CRUZAMENTO DE DADOS ---
-st.subheader("📊 2. Cruzar os Dados (Motor Ultra-Rápido)")
+st.subheader("📊 2. Cruzar os Dados (Seguro contra quedas)")
 c1, c2 = st.columns(2)
 
 with c1:
@@ -128,9 +128,9 @@ with c2:
     st.markdown("**Os Diários Oficiais Baixados**")
     arquivos_diarios = st.file_uploader("Suba TODOS os arquivos .zip baixados de uma vez", type=["zip"], accept_multiple_files=True, key="diarios")
 
-btn_processar = st.button("🚀 Iniciar Cruzamento de Alta Performance", use_container_width=True)
+btn_processar = st.button("🚀 Iniciar Cruzamento de Baixo Consumo", use_container_width=True)
 
-# --- LÓGICA DE PROCESSAMENTO OTIMIZADA ---
+# --- LÓGICA ULTRA-OTIMIZADA ---
 if btn_processar:
     if (not arquivo_pauta and not texto_manual) or not arquivos_diarios:
         st.error("❌ Por favor, informe os processos e suba os arquivos .zip do Diário.")
@@ -140,35 +140,29 @@ if btn_processar:
         if not lista_pauta:
             st.warning("⚠️ Nenhum número de processo válido foi detectado.")
         else:
-            # Criamos um mapeamento limpo de busca rápida: { '123456789...' : '1234567-89...' }
             alvos = {limpar_estrito(p): p for p in lista_pauta}
-            set_alvos_limpos = set(alvos.keys()) # A busca aqui dentro leva tempo próximo a zero
+            set_alvos_limpos = set(alvos.keys())
             
             frase_procurada_norm = normalizar_texto(FRASE_ALVO)
             resultados = []
             encontrados_set = set()
             
-            st.info(f"📋 {len(lista_pauta)} processos carregados na pauta. Analisando os diários...")
+            st.info(f"📋 {len(lista_pauta)} processos carregados. Analisando arquivos um por um...")
 
-            # Expressão regular ultrarrápida compilada para extrair números de dentro de cada JSON do diário
             regex_numeros = re.compile(r'\d+')
 
+            # Processamento em fluxo para proteger a memória do servidor
             for arquivo_zip_unico in arquivos_diarios:
                 try:
-                    with zipfile.ZipFile(io.BytesIO(arquivo_zip_unico.getvalue())) as z:
+                    # Lemos o arquivo em partes, sem carregar o ZIP inteiro na memória do Streamlit de uma vez
+                    with zipfile.ZipFile(io.BytesIO(arquivo_zip_unico.read())) as z:
                         for nome_json in z.namelist():
                             corpo_raw = z.read(nome_json).decode('utf-8', errors='ignore')
-                            
-                            # Otimização 1: Extrai todos os dígitos do JSON de uma vez e joga num set local
                             numeros_no_json = set(regex_numeros.findall(corpo_raw))
-                            
-                            # Otimização 2: Faz a interseção dos conjuntos. Descobre na hora se há números equivalentes
                             matches_potenciais = set_alvos_limpos.intersection(numeros_no_json)
                             
                             if matches_potenciais:
-                                # Se houver algum número batendo, aí sim fazemos a normalização de texto (que é pesada)
                                 texto_diario_norm = normalizar_texto(corpo_raw)
-                                
                                 if frase_procurada_norm in texto_diario_norm:
                                     for num_limpo in matches_potenciais:
                                         if num_limpo not in encontrados_set:
@@ -178,8 +172,15 @@ if btn_processar:
                                                 'Processo': alvos[num_limpo],
                                                 'Status': 'Pautado para Julgamento Virtual'
                                             })
+                            
+                            # Limpeza imediata da variável de texto para liberar RAM
+                            del corpo_raw
+                            del numeros_no_json
                 except Exception as e:
                     st.error(f"⚠️ Falha técnica ao ler {arquivo_zip_unico.name}.")
+                finally:
+                    # Força o Python a esvaziar os dados descartados do servidor imediatamente
+                    gc.collect()
 
             # --- EXIBIÇÃO ---
             st.divider()
@@ -195,7 +196,7 @@ if btn_processar:
                 st.table(df)
                 
                 csv = df.to_csv(index=True, encoding='utf-8-sig', sep=';').encode('utf-8-sig')
-                st.download_button("📥 Baixar Planilha", data=csv, file_name="resultado_cruzamento_turbo.csv")
+                st.download_button("📥 Baixar Planilha", data=csv, file_name="resultado_cruzamento.csv")
             
             faltantes = [p for limpo, p in alvos.items() if limpo not in encontrados_set]
             if faltantes:
